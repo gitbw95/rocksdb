@@ -294,6 +294,13 @@ DECLARE_bool(async_io);
 DECLARE_string(wal_compression);
 DECLARE_bool(verify_sst_unique_id_in_manifest);
 
+// Options for compressed secondary cache.
+DECLARE_bool(use_compressed_secondary_cache);
+DECLARE_int64(compressed_secondary_cache_size);
+DECLARE_int32(compressed_secondary_cache_numshardbits);
+DECLARE_string(comp_sec_cache_compression_type);
+DECLARE_int32(comp_sec_cache_compress_format_version);
+
 constexpr long KB = 1024;
 constexpr int kRandomValueMaxFactor = 3;
 constexpr int kValueMaxLen = 100;
@@ -305,6 +312,8 @@ extern std::shared_ptr<ROCKSDB_NAMESPACE::FaultInjectionTestFS> fault_fs_guard;
 
 extern enum ROCKSDB_NAMESPACE::CompressionType compression_type_e;
 extern enum ROCKSDB_NAMESPACE::CompressionType bottommost_compression_type_e;
+extern enum ROCKSDB_NAMESPACE::CompressionType
+    comp_sec_cache_compression_type_e;
 extern enum ROCKSDB_NAMESPACE::ChecksumType checksum_type_e;
 
 enum RepFactory { kSkipList, kHashSkipList, kVectorRep };

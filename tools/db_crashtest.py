@@ -174,6 +174,12 @@ default_params = {
     "async_io": lambda: random.choice([0, 1]),
     "wal_compression": lambda: random.choice(["none", "zstd"]),
     "verify_sst_unique_id_in_manifest": 1,  # always do unique_id verification
+    # For compressed secondary cache.
+    "use_compressed_secondary_cache" : lambda: random.randint(0, 1),
+    "compressed_secondary_cache_size": 8388608,
+    "comp_sec_cache_compression_type": lambda: random.choice(
+        ["none", "snappy", "zlib", "lz4", "lz4hc", "xpress", "zstd"]),
+    "comp_sec_cache_compress_format_version": lambda: random.choice([1, 2]),
 }
 
 _TEST_DIR_ENV_VAR = 'TEST_TMPDIR'

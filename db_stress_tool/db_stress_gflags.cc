@@ -346,6 +346,30 @@ DEFINE_int32(
 DEFINE_bool(use_clock_cache, false,
             "Replace default LRU block cache with clock cache.");
 
+DEFINE_bool(use_compressed_secondary_cache, false,
+            "Use the CompressedSecondaryCache as the secondary cache.");
+
+DEFINE_int64(compressed_secondary_cache_size, 2LL * KB * KB * KB,
+             "Number of bytes to use as a cache of data");
+
+DEFINE_int32(compressed_secondary_cache_numshardbits, 6,
+             "Number of shards for the block cache"
+             " is 2 ** compressed_secondary_cache_numshardbits."
+             " Negative means use default settings."
+             " This is applied only if FLAGS_compressed_secondary_cache_size"
+             " is non-negative.");
+
+DEFINE_string(comp_sec_cache_compression_type, "lz4",
+              "The compression algorithm to use for large "
+              "values stored in CompressedSecondaryCache.");
+
+DEFINE_int32(comp_sec_cache_compress_format_version, 2,
+             "compress_format_version can have two values: "
+             "compress_format_version == 1 -- decompressed size is not included"
+             " in the block header."
+             "compress_format_version == 2 -- decompressed size is included"
+             " in the block header in varint32 format.");
+
 DEFINE_uint64(subcompactions, 1,
               "Maximum number of subcompactions to divide L0-L1 compactions "
               "into.");

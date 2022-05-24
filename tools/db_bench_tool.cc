@@ -572,7 +572,8 @@ DEFINE_int32(compressed_secondary_cache_numshardbits, 6,
              "Number of shards for the block cache"
              " is 2 ** compressed_secondary_cache_numshardbits."
              " Negative means use default settings."
-             " This is applied only if FLAGS_cache_size is non-negative.");
+             " This is applied only if FLAGS_compressed_secondary_cache_size"
+             " is non-negative.");
 
 DEFINE_double(compressed_secondary_cache_high_pri_pool_ratio, 0.0,
               "Ratio of block cache reserve for high pri blocks. "

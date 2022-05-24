@@ -159,6 +159,18 @@ std::shared_ptr<Cache> StressTest::NewCache(size_t capacity,
       opts.secondary_cache = secondary_cache;
     }
 #endif
+
+    if (FLAGS_use_compressed_secondary_cache) {
+      CompressedSecondaryCacheOptions secondary_cache_opts;
+      secondary_cache_opts.capacity = FLAGS_compressed_secondary_cache_size;
+      secondary_cache_opts.num_shard_bits =
+          FLAGS_compressed_secondary_cache_numshardbits;
+      secondary_cache_opts.compression_type = comp_sec_cache_compression_type_e;
+      secondary_cache_opts.compress_format_version =
+          FLAGS_comp_sec_cache_compress_format_version;
+      opts.secondary_cache = NewCompressedSecondaryCache(secondary_cache_opts);
+    }
+
     return NewLRUCache(opts);
   }
 }
@@ -2317,6 +2329,17 @@ void StressTest::PrintEnv() const {
           FLAGS_wal_compression.c_str());
   fprintf(stdout, "Try verify sst unique id  : %d\n",
           static_cast<int>(FLAGS_verify_sst_unique_id_in_manifest));
+
+  fprintf(stdout, "Use compressed secondary cache: %s\n",
+          FLAGS_use_compressed_secondary_cache ? "true" : "false");
+  fprintf(stdout, "Compressed secondary cache size: %" PRIu64 "\n",
+          FLAGS_compressed_secondary_cache_size);
+  std::string sec_cache_comp_type =
+      CompressionTypeToString(comp_sec_cache_compression_type_e);
+  fprintf(stdout, "Comp sec cache compression type: %s\n",
+          sec_cache_comp_type.c_str());
+  fprintf(stdout, "Comp sec cache compress format version: %d\n",
+          static_cast<int>(FLAGS_comp_sec_cache_compress_format_version));
 
   fprintf(stdout, "------------------------------------------------\n");
 }
