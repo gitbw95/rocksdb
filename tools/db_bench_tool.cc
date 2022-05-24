@@ -318,6 +318,8 @@ DEFINE_bool(reverse_iterator, false,
             "When true use Prev rather than Next for iterators that do "
             "Seek and then Next");
 
+DEFINE_bool(auto_prefix_mode, false, "Set auto_prefix_mode for seek benchmark");
+
 DEFINE_int64(max_scan_distance, 0,
              "Used to define iterate_upper_bound (or iterate_lower_bound "
              "if FLAGS_reverse_iterator is set to true) when value is nonzero");
@@ -1214,6 +1216,11 @@ DEFINE_int32(compression_parallel_threads, 1,
 DEFINE_uint64(compression_max_dict_buffer_bytes,
               ROCKSDB_NAMESPACE::CompressionOptions().max_dict_buffer_bytes,
               "Maximum bytes to buffer to collect samples for dictionary.");
+
+DEFINE_bool(compression_use_zstd_dict_trainer,
+            ROCKSDB_NAMESPACE::CompressionOptions().use_zstd_dict_trainer,
+            "If true, use ZSTD_TrainDictionary() to create dictionary, else"
+            "use ZSTD_FinalizeDictionary() to create dictionary");
 
 static bool ValidateTableCacheNumshardbits(const char* flagname,
                                            int32_t value) {
@@ -2564,7 +2571,7 @@ class Benchmark {
  private:
   std::shared_ptr<Cache> cache_;
   std::shared_ptr<Cache> compressed_cache_;
-  const SliceTransform* prefix_extractor_;
+  std::shared_ptr<const SliceTransform> prefix_extractor_;
   DBWithColumnFamilies db_;
   std::vector<DBWithColumnFamilies> multi_dbs_;
   int64_t num_;
@@ -2967,7 +2974,9 @@ class Benchmark {
   Benchmark()
       : cache_(NewCache(FLAGS_cache_size)),
         compressed_cache_(NewCache(FLAGS_compressed_cache_size)),
-        prefix_extractor_(NewFixedPrefixTransform(FLAGS_prefix_size)),
+        prefix_extractor_(FLAGS_prefix_size != 0
+                              ? NewFixedPrefixTransform(FLAGS_prefix_size)
+                              : nullptr),
         num_(FLAGS_num),
         key_size_(FLAGS_key_size),
         user_timestamp_size_(FLAGS_user_timestamp_size),
@@ -3058,7 +3067,6 @@ class Benchmark {
 
   ~Benchmark() {
     DeleteDBs();
-    delete prefix_extractor_;
     if (cache_.get() != nullptr) {
       // Clear cache reference first
       open_options_.write_buffer_manager.reset();
@@ -3974,6 +3982,8 @@ class Benchmark {
         FLAGS_compression_parallel_threads;
     options.compression_opts.max_dict_buffer_bytes =
         FLAGS_compression_max_dict_buffer_bytes;
+    options.compression_opts.use_zstd_dict_trainer =
+        FLAGS_compression_use_zstd_dict_trainer;
 
     options.max_open_files = FLAGS_open_files;
     if (FLAGS_cost_write_buffer_to_cache || FLAGS_db_write_buffer_size != 0) {
@@ -4009,10 +4019,7 @@ class Benchmark {
         FLAGS_fifo_compaction_allow_compaction);
     options.compaction_options_fifo.age_for_warm = FLAGS_fifo_age_for_warm;
 #endif  // ROCKSDB_LITE
-    if (FLAGS_prefix_size != 0) {
-      options.prefix_extractor.reset(
-          NewFixedPrefixTransform(FLAGS_prefix_size));
-    }
+    options.prefix_extractor = prefix_extractor_;
     if (FLAGS_use_uint64_comparator) {
       options.comparator = test::Uint64Comparator();
       if (FLAGS_key_size != 8) {
@@ -6509,6 +6516,7 @@ class Benchmark {
         }
       }
     }
+    options.auto_prefix_mode = FLAGS_auto_prefix_mode;
 
     std::unique_ptr<const char[]> key_guard;
     Slice key = AllocateKey(&key_guard);
@@ -6538,6 +6546,14 @@ class Benchmark {
                              &upper_bound);
           options.iterate_upper_bound = &upper_bound;
         }
+      } else if (FLAGS_auto_prefix_mode && prefix_extractor_ &&
+                 !FLAGS_reverse_iterator) {
+        // Set upper bound to next prefix
+        auto mutable_upper_bound = const_cast<char*>(upper_bound.data());
+        std::memcpy(mutable_upper_bound, key.data(), prefix_size_);
+        mutable_upper_bound[prefix_size_ - 1]++;
+        upper_bound = Slice(upper_bound.data(), prefix_size_);
+        options.iterate_upper_bound = &upper_bound;
       }
 
       // Pick a Iterator to use

@@ -1296,6 +1296,7 @@ TEST_F(DBTest2, PresetCompressionDict) {
   enum DictionaryTypes : int {
     kWithoutDict,
     kWithDict,
+    kWithZSTDfinalizeDict,
     kWithZSTDTrainedDict,
     kDictEnd,
   };
@@ -1304,6 +1305,7 @@ TEST_F(DBTest2, PresetCompressionDict) {
     options.compression = compression_type;
     size_t bytes_without_dict = 0;
     size_t bytes_with_dict = 0;
+    size_t bytes_with_zstd_finalize_dict = 0;
     size_t bytes_with_zstd_trained_dict = 0;
     for (int i = kWithoutDict; i < kDictEnd; i++) {
       // First iteration: compress without preset dictionary
@@ -1323,12 +1325,21 @@ TEST_F(DBTest2, PresetCompressionDict) {
           options.compression_opts.max_dict_bytes = kBlockSizeBytes;
           options.compression_opts.zstd_max_train_bytes = 0;
           break;
+        case kWithZSTDfinalizeDict:
+          if (compression_type != kZSTD) {
+            continue;
+          }
+          options.compression_opts.max_dict_bytes = kBlockSizeBytes;
+          options.compression_opts.zstd_max_train_bytes = kL0FileBytes;
+          options.compression_opts.use_zstd_dict_trainer = false;
+          break;
         case kWithZSTDTrainedDict:
           if (compression_type != kZSTD) {
             continue;
           }
           options.compression_opts.max_dict_bytes = kBlockSizeBytes;
           options.compression_opts.zstd_max_train_bytes = kL0FileBytes;
+          options.compression_opts.use_zstd_dict_trainer = true;
           break;
         default:
           assert(false);
@@ -1365,6 +1376,8 @@ TEST_F(DBTest2, PresetCompressionDict) {
         bytes_without_dict = total_sst_bytes;
       } else if (i == kWithDict) {
         bytes_with_dict = total_sst_bytes;
+      } else if (i == kWithZSTDfinalizeDict) {
+        bytes_with_zstd_finalize_dict = total_sst_bytes;
       } else if (i == kWithZSTDTrainedDict) {
         bytes_with_zstd_trained_dict = total_sst_bytes;
       }
@@ -1375,6 +1388,13 @@ TEST_F(DBTest2, PresetCompressionDict) {
       }
       if (i == kWithDict) {
         ASSERT_GT(bytes_without_dict, bytes_with_dict);
+      } else if (i == kWithZSTDTrainedDict) {
+        // In zstd compression, it is sometimes possible that using a finalized
+        // dictionary does not get as good a compression ratio as raw content
+        // dictionary. But using a dictionary should always get better
+        // compression ratio than not using one.
+        ASSERT_TRUE(bytes_with_dict > bytes_with_zstd_finalize_dict ||
+                    bytes_without_dict > bytes_with_zstd_finalize_dict);
       } else if (i == kWithZSTDTrainedDict) {
         // In zstd compression, it is sometimes possible that using a trained
         // dictionary does not get as good a compression ratio as without
@@ -6309,115 +6329,118 @@ TEST_F(DBTest2, BlockBasedTablePrefixGetIndexNotFound) {
 
 #ifndef ROCKSDB_LITE
 TEST_F(DBTest2, AutoPrefixMode1) {
-  // create a DB with block prefix index
-  BlockBasedTableOptions table_options;
-  Options options = CurrentOptions();
-  table_options.filter_policy.reset(NewBloomFilterPolicy(10, false));
-  options.table_factory.reset(NewBlockBasedTableFactory(table_options));
-  options.prefix_extractor.reset(NewFixedPrefixTransform(1));
-  options.statistics = CreateDBStatistics();
+  do {
+    // create a DB with block prefix index
+    Options options = CurrentOptions();
+    BlockBasedTableOptions table_options =
+        *options.table_factory->GetOptions<BlockBasedTableOptions>();
+    table_options.filter_policy.reset(NewBloomFilterPolicy(10, false));
+    options.table_factory.reset(NewBlockBasedTableFactory(table_options));
+    options.prefix_extractor.reset(NewFixedPrefixTransform(1));
+    options.statistics = CreateDBStatistics();
 
-  Reopen(options);
+    Reopen(options);
 
-  Random rnd(301);
-  std::string large_value = rnd.RandomString(500);
+    Random rnd(301);
+    std::string large_value = rnd.RandomString(500);
 
-  ASSERT_OK(Put("a1", large_value));
-  ASSERT_OK(Put("x1", large_value));
-  ASSERT_OK(Put("y1", large_value));
-  ASSERT_OK(Flush());
+    ASSERT_OK(Put("a1", large_value));
+    ASSERT_OK(Put("x1", large_value));
+    ASSERT_OK(Put("y1", large_value));
+    ASSERT_OK(Flush());
 
-  ReadOptions ro;
-  ro.total_order_seek = false;
-  ro.auto_prefix_mode = true;
-  {
-    std::unique_ptr<Iterator> iterator(db_->NewIterator(ro));
-    iterator->Seek("b1");
-    ASSERT_TRUE(iterator->Valid());
-    ASSERT_EQ("x1", iterator->key().ToString());
-    ASSERT_EQ(0, TestGetTickerCount(options, BLOOM_FILTER_PREFIX_CHECKED));
-    ASSERT_OK(iterator->status());
-  }
+    ReadOptions ro;
+    ro.total_order_seek = false;
+    ro.auto_prefix_mode = true;
+    {
+      std::unique_ptr<Iterator> iterator(db_->NewIterator(ro));
+      iterator->Seek("b1");
+      ASSERT_TRUE(iterator->Valid());
+      ASSERT_EQ("x1", iterator->key().ToString());
+      ASSERT_EQ(0, TestGetTickerCount(options, BLOOM_FILTER_PREFIX_CHECKED));
+      ASSERT_OK(iterator->status());
+    }
 
-  std::string ub_str = "b9";
-  Slice ub(ub_str);
-  ro.iterate_upper_bound = &ub;
-
-  {
-    std::unique_ptr<Iterator> iterator(db_->NewIterator(ro));
-    iterator->Seek("b1");
-    ASSERT_FALSE(iterator->Valid());
-    ASSERT_EQ(1, TestGetTickerCount(options, BLOOM_FILTER_PREFIX_CHECKED));
-    ASSERT_OK(iterator->status());
-  }
-
-  ub_str = "z";
-  ub = Slice(ub_str);
-  {
-    std::unique_ptr<Iterator> iterator(db_->NewIterator(ro));
-    iterator->Seek("b1");
-    ASSERT_TRUE(iterator->Valid());
-    ASSERT_EQ("x1", iterator->key().ToString());
-    ASSERT_EQ(1, TestGetTickerCount(options, BLOOM_FILTER_PREFIX_CHECKED));
-    ASSERT_OK(iterator->status());
-  }
-
-  ub_str = "c";
-  ub = Slice(ub_str);
-  {
-    std::unique_ptr<Iterator> iterator(db_->NewIterator(ro));
-    iterator->Seek("b1");
-    ASSERT_FALSE(iterator->Valid());
-    ASSERT_EQ(2, TestGetTickerCount(options, BLOOM_FILTER_PREFIX_CHECKED));
-    ASSERT_OK(iterator->status());
-  }
-
-  // The same queries without recreating iterator
-  {
-    ub_str = "b9";
-    ub = Slice(ub_str);
+    std::string ub_str = "b9";
+    Slice ub(ub_str);
     ro.iterate_upper_bound = &ub;
 
-    std::unique_ptr<Iterator> iterator(db_->NewIterator(ro));
-    iterator->Seek("b1");
-    ASSERT_FALSE(iterator->Valid());
-    ASSERT_EQ(3, TestGetTickerCount(options, BLOOM_FILTER_PREFIX_CHECKED));
-    ASSERT_OK(iterator->status());
+    {
+      std::unique_ptr<Iterator> iterator(db_->NewIterator(ro));
+      iterator->Seek("b1");
+      ASSERT_FALSE(iterator->Valid());
+      ASSERT_EQ(1, TestGetTickerCount(options, BLOOM_FILTER_PREFIX_CHECKED));
+      ASSERT_OK(iterator->status());
+    }
 
     ub_str = "z";
     ub = Slice(ub_str);
-
-    iterator->Seek("b1");
-    ASSERT_TRUE(iterator->Valid());
-    ASSERT_EQ("x1", iterator->key().ToString());
-    ASSERT_EQ(3, TestGetTickerCount(options, BLOOM_FILTER_PREFIX_CHECKED));
+    {
+      std::unique_ptr<Iterator> iterator(db_->NewIterator(ro));
+      iterator->Seek("b1");
+      ASSERT_TRUE(iterator->Valid());
+      ASSERT_EQ("x1", iterator->key().ToString());
+      ASSERT_EQ(1, TestGetTickerCount(options, BLOOM_FILTER_PREFIX_CHECKED));
+      ASSERT_OK(iterator->status());
+    }
 
     ub_str = "c";
     ub = Slice(ub_str);
+    {
+      std::unique_ptr<Iterator> iterator(db_->NewIterator(ro));
+      iterator->Seek("b1");
+      ASSERT_FALSE(iterator->Valid());
+      ASSERT_EQ(2, TestGetTickerCount(options, BLOOM_FILTER_PREFIX_CHECKED));
+      ASSERT_OK(iterator->status());
+    }
 
-    iterator->Seek("b1");
-    ASSERT_FALSE(iterator->Valid());
-    ASSERT_EQ(4, TestGetTickerCount(options, BLOOM_FILTER_PREFIX_CHECKED));
+    // The same queries without recreating iterator
+    {
+      ub_str = "b9";
+      ub = Slice(ub_str);
+      ro.iterate_upper_bound = &ub;
 
-    ub_str = "b9";
-    ub = Slice(ub_str);
-    ro.iterate_upper_bound = &ub;
-    iterator->SeekForPrev("b1");
-    ASSERT_TRUE(iterator->Valid());
-    ASSERT_EQ("a1", iterator->key().ToString());
-    ASSERT_EQ(4, TestGetTickerCount(options, BLOOM_FILTER_PREFIX_CHECKED));
+      std::unique_ptr<Iterator> iterator(db_->NewIterator(ro));
+      iterator->Seek("b1");
+      ASSERT_FALSE(iterator->Valid());
+      ASSERT_EQ(3, TestGetTickerCount(options, BLOOM_FILTER_PREFIX_CHECKED));
+      ASSERT_OK(iterator->status());
 
-    ub_str = "zz";
-    ub = Slice(ub_str);
-    ro.iterate_upper_bound = &ub;
-    iterator->SeekToLast();
-    ASSERT_TRUE(iterator->Valid());
-    ASSERT_EQ("y1", iterator->key().ToString());
+      ub_str = "z";
+      ub = Slice(ub_str);
 
-    iterator->SeekToFirst();
-    ASSERT_TRUE(iterator->Valid());
-    ASSERT_EQ("a1", iterator->key().ToString());
-  }
+      iterator->Seek("b1");
+      ASSERT_TRUE(iterator->Valid());
+      ASSERT_EQ("x1", iterator->key().ToString());
+      ASSERT_EQ(3, TestGetTickerCount(options, BLOOM_FILTER_PREFIX_CHECKED));
+
+      ub_str = "c";
+      ub = Slice(ub_str);
+
+      iterator->Seek("b1");
+      ASSERT_FALSE(iterator->Valid());
+      ASSERT_EQ(4, TestGetTickerCount(options, BLOOM_FILTER_PREFIX_CHECKED));
+
+      ub_str = "b9";
+      ub = Slice(ub_str);
+      ro.iterate_upper_bound = &ub;
+      iterator->SeekForPrev("b1");
+      ASSERT_TRUE(iterator->Valid());
+      ASSERT_EQ("a1", iterator->key().ToString());
+      ASSERT_EQ(4, TestGetTickerCount(options, BLOOM_FILTER_PREFIX_CHECKED));
+
+      ub_str = "zz";
+      ub = Slice(ub_str);
+      ro.iterate_upper_bound = &ub;
+      iterator->SeekToLast();
+      ASSERT_TRUE(iterator->Valid());
+      ASSERT_EQ("y1", iterator->key().ToString());
+
+      iterator->SeekToFirst();
+      ASSERT_TRUE(iterator->Valid());
+      ASSERT_EQ("a1", iterator->key().ToString());
+    }
+  } while (ChangeOptions(kSkipPlainTable));
 }
 
 class RenameCurrentTest : public DBTestBase,

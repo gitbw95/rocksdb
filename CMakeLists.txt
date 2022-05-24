@@ -796,6 +796,7 @@ set(SOURCES
         trace_replay/trace_record_result.cc
         trace_replay/trace_record.cc
         trace_replay/trace_replay.cc
+        util/async_file_reader.cc
         util/cleanable.cc
         util/coding.cc
         util/compaction_job_stats_impl.cc
@@ -1128,6 +1129,12 @@ if(NOT WIN32 OR ROCKSDB_INSTALL_ON_WINDOWS)
 
   install(DIRECTORY include/rocksdb COMPONENT devel DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
 
+  foreach (plugin ${PLUGINS})
+    foreach (header ${${plugin}_HEADERS})
+      install(FILES plugin/${plugin}/${header} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rocksdb/plugin/${plugin})
+    endforeach()
+  endforeach()
+
   install(DIRECTORY "${PROJECT_SOURCE_DIR}/cmake/modules" COMPONENT devel DESTINATION ${package_config_destination})
 
   install(
@@ -1216,6 +1223,7 @@ if(WITH_TESTS)
         db/comparator_db_test.cc
         db/corruption_test.cc
         db/cuckoo_table_db_test.cc
+        db/db_readonly_with_timestamp_test.cc
         db/db_with_timestamp_basic_test.cc
         db/db_block_cache_test.cc
         db/db_bloom_filter_test.cc
@@ -1384,6 +1392,7 @@ if(WITH_TESTS)
 
   set(TESTUTIL_SOURCE
       db/db_test_util.cc
+      db/db_with_timestamp_test_util.cc
       monitoring/thread_status_updater_debug.cc
       table/mock_table.cc
       utilities/agg_merge/test_agg_merge.cc
