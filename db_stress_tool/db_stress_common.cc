@@ -8,6 +8,7 @@
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 //
 
+#include "rocksdb/compression_type.h"
 #ifdef GFLAGS
 #include "db_stress_tool/db_stress_common.h"
 
@@ -25,6 +26,8 @@ enum ROCKSDB_NAMESPACE::CompressionType compression_type_e =
     ROCKSDB_NAMESPACE::kSnappyCompression;
 enum ROCKSDB_NAMESPACE::CompressionType bottommost_compression_type_e =
     ROCKSDB_NAMESPACE::kSnappyCompression;
+enum ROCKSDB_NAMESPACE::CompressionType comp_sec_cache_compression_type_e =
+    ROCKSDB_NAMESPACE::kLZ4Compression;
 enum ROCKSDB_NAMESPACE::ChecksumType checksum_type_e =
     ROCKSDB_NAMESPACE::kCRC32c;
 enum RepFactory FLAGS_rep_factory = kSkipList;
